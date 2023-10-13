@@ -31,7 +31,14 @@ export async function GET() {
     }),
   });
 
+  if (!response.ok) {
+    return Response.json(
+      { message: "Failed to fetch random question" },
+      { status: response.status, statusText: response.statusText }
+    );
+  }
+
   const { data } = await response.json();
-  
+
   return Response.json(data);
 }
