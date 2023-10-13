@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@slack/web-api": "^6.9.0",
     "next": "13.5.4"
   },
   "devDependencies": {
