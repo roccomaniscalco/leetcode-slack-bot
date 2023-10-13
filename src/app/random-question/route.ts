@@ -1,32 +1,47 @@
 import { WebClient } from "@slack/web-api";
 import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse";
+import { z } from "zod";
+
+const questionQuery = `
+query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
+  randomQuestion(categorySlug: $categorySlug, filters: $filters) {
+    questionId
+    title
+    titleSlug
+    difficulty
+    likes
+    dislikes
+    isPaidOnly
+    categoryTitle
+    content
+  }
+}
+`;
+
+const questionSchema = z.object({
+  randomQuestion: z.object({
+    questionId: z.string(),
+    title: z.string(),
+    titleSlug: z.string(),
+    difficulty: z.enum(["Easy", "Medium", "Hard"]),
+    likes: z.number(),
+    dislikes: z.number(),
+    isPaidOnly: z.boolean(),
+    categoryTitle: z.string(),
+    content: z.string().nullable(),
+  }),
+});
+
+type Question = z.infer<typeof questionSchema>["randomQuestion"];
 
 export async function GET() {
-  const query = `
-  query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
-    randomQuestion(categorySlug: $categorySlug, filters: $filters) {
-      questionId
-      title
-      titleSlug
-      difficulty
-      likes
-      dislikes
-      isPaidOnly
-      categoryTitle
-      content
-    }
-  }
-  `;
-
-  const response = await fetch("https://leetcode.com/graphql", {
+  const res = await fetch("https://leetcode.com/graphql", {
     next: { revalidate: 0 }, // Always revalidate
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       operationName: "randomQuestion",
-      query: query,
+      query: questionQuery,
       variables: {
         categorySlug: "",
         filters: {},
@@ -34,21 +49,22 @@ export async function GET() {
     }),
   });
 
-  if (!response.ok) {
+  if (!res.ok) {
     return Response.json(
       { message: "Failed to fetch random question" },
-      { status: response.status, statusText: response.statusText }
+      { status: res.status, statusText: res.statusText }
     );
   }
 
-  const { data } = await response.json();
+  const { data } = await res.json();
+  const { randomQuestion } = questionSchema.parse(data);
 
-  postQuestionToSlack(data.randomQuestion);
+  postQuestionToSlack(randomQuestion);
 
   return Response.json(data);
 }
 
-async function postQuestionToSlack({ title, titleSlug }) {
+async function postQuestionToSlack({ title, titleSlug }: Question) {
   const web = new WebClient(process.env.SLACK_TOKEN);
 
   for await (const page of web.paginate("conversations.list")) {

@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@slack/web-api": "^6.9.0",
-    "next": "13.5.4"
+    "next": "13.5.4",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/node": "^20",
