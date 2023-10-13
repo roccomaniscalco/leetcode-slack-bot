@@ -35,33 +35,41 @@ const questionSchema = z.object({
 type Question = z.infer<typeof questionSchema>["randomQuestion"];
 
 export async function GET() {
-  const res = await fetch("https://leetcode.com/graphql", {
-    next: { revalidate: 0 }, // Always revalidate
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      operationName: "randomQuestion",
-      query: questionQuery,
-      variables: {
-        categorySlug: "",
-        filters: {},
-      },
-    }),
-  });
+  let randomQuestion: Question;
 
-  if (!res.ok) {
-    return Response.json(
-      { message: "Failed to fetch random question" },
-      { status: res.status, statusText: res.statusText }
-    );
-  }
+  do {
+    const res = await fetch("https://leetcode.com/graphql", {
+      next: { revalidate: 0 }, // Always revalidate
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operationName: "randomQuestion",
+        query: questionQuery,
+        variables: {
+          categorySlug: "",
+          filters: {},
+        },
+      }),
+    });
 
-  const { data } = await res.json();
-  const { randomQuestion } = questionSchema.parse(data);
+    if (!res.ok) {
+      return Response.json(
+        { message: "Failed to fetch random question" },
+        { status: res.status, statusText: res.statusText }
+      );
+    }
+
+    const { data } = await res.json();
+    randomQuestion = questionSchema.parse(data).randomQuestion;
+  } while (!isQuestionValid(randomQuestion));
 
   postQuestionToSlack(randomQuestion);
 
-  return Response.json(data);
+  return Response.json(randomQuestion);
+}
+
+function isQuestionValid(question: Question) {
+  return !question.isPaidOnly && question.difficulty !== "Hard";
 }
 
 async function postQuestionToSlack({ title, titleSlug }: Question) {
@@ -70,7 +78,7 @@ async function postQuestionToSlack({ title, titleSlug }: Question) {
   for await (const page of web.paginate("conversations.list")) {
     for (const channel of page.channels as Channel[]) {
       if (channel.is_member && channel.id) {
-        await web.chat.postMessage({
+        web.chat.postMessage({
           channel: channel.id,
           text: `<https://leetcode.com/problems/${titleSlug} | ${title}>`,
           mrkdwn: true,
