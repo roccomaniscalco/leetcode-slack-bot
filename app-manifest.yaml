@@ -1,0 +1,17 @@
+display_information:
+  name: LeetBot
+  description: Daily LeetCode questions for your Slack channel
+  background_color: "#000000"
+features:
+  bot_user:
+    display_name: LeetBot
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - channels:read
+      - chat:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
