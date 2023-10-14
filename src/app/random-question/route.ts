@@ -72,7 +72,7 @@ async function postQuestionToSlack(question: Question) {
 
   for await (const page of web.paginate("conversations.list")) {
     for (const channel of page.channels as Channel[]) {
-      if (channel.is_member && channel.id) {
+      if (channel.is_member && channel.id && !channel.is_archived) {
         const questionMessage = getQuestionMessage(question, channel.id);
         const res = await web.chat.postMessage(questionMessage);
 
