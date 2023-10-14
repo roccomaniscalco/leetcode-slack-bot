@@ -1,4 +1,4 @@
-import { KnownBlock, WebClient } from "@slack/web-api";
+import { ChatPostMessageArguments, WebClient } from "@slack/web-api";
 import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse";
 import { z } from "zod";
 
@@ -9,11 +9,10 @@ query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
     title
     titleSlug
     difficulty
+    categoryTitle
     likes
     dislikes
     isPaidOnly
-    categoryTitle
-    content
   }
 }
 `;
@@ -29,7 +28,6 @@ const questionSchema = z
       likes: z.number(),
       dislikes: z.number(),
       isPaidOnly: z.literal(false), // true not allowed
-      content: z.string(), // null not allowed
     }),
   })
   .transform(({ randomQuestion }) => randomQuestion);
@@ -66,53 +64,66 @@ export async function GET() {
   } while (!question.success);
 
   await postQuestionToSlack(question.data);
-  return Response.json(question.data);
+  return Response.json(question.data, { status: 200 });
 }
 
 async function postQuestionToSlack(question: Question) {
   const web = new WebClient(process.env.SLACK_TOKEN);
-  const blocks = getQuestionBlocks(question);
 
   for await (const page of web.paginate("conversations.list")) {
     for (const channel of page.channels as Channel[]) {
       if (channel.is_member && channel.id) {
-        web.chat.postMessage({
-          channel: channel.id,
-          unfurl_links: false,
-          blocks,
-        });
+        const questionMessage = getQuestionMessage(question, channel.id);
+        const res = await web.chat.postMessage(questionMessage);
+
+        if (!res.ok) {
+          console.error("Failed to post question to Slack", res);
+        }
       }
     }
   }
 }
 
-function getQuestionBlocks(question: Question): KnownBlock[] {
+function getQuestionMessage(
+  question: Question,
+  channelId: string
+): ChatPostMessageArguments {
   const difficultyEmoji = {
     Easy: "🟢",
     Medium: "🟡",
     Hard: "🔴",
   };
-  const questionLink = `https://leetcode.com/problems/${question.titleSlug}`;
+  const questionUrl = `https://leetcode.com/problems/${question.titleSlug}`;
 
-  return [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `Question of the day:\n*<${questionLink}|${question.title}>*`,
-      },
-    },
-    {
-      type: "context",
-      elements: [
-        {
+  return {
+    channel: channelId,
+    unfurl_links: false,
+    mrkdwn: true,
+    text: `Question of the day:\n*<${questionUrl}|${question.title}>*`,
+    blocks: [
+      {
+        type: "section",
+        text: {
           type: "mrkdwn",
-          text: `*${question.categoryTitle}*  |  *${difficultyEmoji[question.difficulty]} ${question.difficulty}*  |  *👍 ${question.likes}*  |  *👎 ${question.dislikes}*`,
+          text: `Question of the day:\n*<${questionUrl}|${question.title}>*`,
         },
-      ],
-    },
-    {
-      type: "divider",
-    }
-  ];
+      },
+      {
+        type: "context",
+        elements: [
+          {
+            type: "mrkdwn",
+            text: `*${question.categoryTitle}*  |  *${
+              difficultyEmoji[question.difficulty]
+            } ${question.difficulty}*  |  *👍 ${question.likes}*  |  *👎 ${
+              question.dislikes
+            }*`,
+          },
+        ],
+      },
+      {
+        type: "divider",
+      },
+    ],
+  };
 }
