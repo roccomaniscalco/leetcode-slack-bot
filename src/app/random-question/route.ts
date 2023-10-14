@@ -34,7 +34,12 @@ const questionSchema = z
 
 type Question = z.infer<typeof questionSchema>;
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authHeader = request.headers.get("authorization");
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return Response.json({ success: false }, { status: 401 });
+  }
+
   let question: z.SafeParseReturnType<any, Question>;
 
   do {
@@ -53,10 +58,7 @@ export async function GET() {
     });
 
     if (!res.ok) {
-      return Response.json(
-        { message: "Failed to fetch random question" },
-        { status: res.status, statusText: res.statusText }
-      );
+      return Response.json({ success: false }, { status: 500 });
     }
 
     const { data } = await res.json();
@@ -64,7 +66,7 @@ export async function GET() {
   } while (!question.success);
 
   await postQuestionToSlack(question.data);
-  return Response.json(question.data, { status: 200 });
+  return Response.json({ success: true }, { status: 200 });
 }
 
 async function postQuestionToSlack(question: Question) {

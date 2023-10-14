@@ -1,0 +1,6 @@
+{
+  "crons": [{
+    "path": "/random-question",
+    "schedule": "0 12 * * *"
+  }]
+}
