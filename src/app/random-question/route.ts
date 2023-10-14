@@ -18,24 +18,26 @@ query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
 }
 `;
 
-const questionSchema = z.object({
-  randomQuestion: z.object({
-    questionId: z.string(),
-    title: z.string(),
-    titleSlug: z.string(),
-    difficulty: z.enum(["Easy", "Medium", "Hard"]),
-    likes: z.number(),
-    dislikes: z.number(),
-    isPaidOnly: z.boolean(),
-    categoryTitle: z.string(),
-    content: z.string().nullable(),
-  }),
-});
+const questionSchema = z
+  .object({
+    randomQuestion: z.object({
+      questionId: z.string(),
+      title: z.string(),
+      titleSlug: z.string(),
+      difficulty: z.enum(["Easy", "Medium"]), // "Hard" not allowed
+      categoryTitle: z.string(),
+      likes: z.number(),
+      dislikes: z.number(),
+      isPaidOnly: z.literal(false), // true not allowed
+      content: z.string(), // null not allowed
+    }),
+  })
+  .transform(({ randomQuestion }) => randomQuestion);
 
-type Question = z.infer<typeof questionSchema>["randomQuestion"];
+type Question = z.infer<typeof questionSchema>;
 
 export async function GET() {
-  let randomQuestion: Question;
+  let question: z.SafeParseReturnType<any, Question>;
 
   do {
     const res = await fetch("https://leetcode.com/graphql", {
@@ -60,16 +62,11 @@ export async function GET() {
     }
 
     const { data } = await res.json();
-    randomQuestion = questionSchema.parse(data).randomQuestion;
-  } while (!isQuestionValid(randomQuestion));
+    question = questionSchema.safeParse(data);
+  } while (!question.success);
 
-  postQuestionToSlack(randomQuestion);
-
-  return Response.json(randomQuestion);
-}
-
-function isQuestionValid(question: Question) {
-  return !question.isPaidOnly && question.difficulty !== "Hard";
+  await postQuestionToSlack(question.data);
+  return Response.json(question.data);
 }
 
 async function postQuestionToSlack({ title, titleSlug }: Question) {
