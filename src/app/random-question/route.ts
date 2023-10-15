@@ -117,7 +117,7 @@ function getQuestionMessage(
             type: "mrkdwn",
             text: `*${question.categoryTitle}*  |  *${
               difficultyEmoji[question.difficulty]
-            } ${question.difficulty}*  |  *👍 ${question.likes}*  |  *👎 ${
+            } ${question.difficulty}*  |  *👍 ${question.likes}*  *👎 ${
               question.dislikes
             }*`,
           },
