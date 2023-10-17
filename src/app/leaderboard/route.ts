@@ -14,12 +14,6 @@ const SUBMISSIONS_LIMIT = 10;
 const now = new Date();
 const startDate = getStartDate(now);
 
-const questionQuery = db
-  .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
-  .from(QuestionTable)
-  .where(gte(QuestionTable.createdAt, startDate))
-  .prepare("question");
-
 const submissionsQuery = `    
 query recentAcSubmissions($username: String!, $limit: Int!) {
   recentAcSubmissionList(username: $username, limit: $limit) {
@@ -64,7 +58,10 @@ export async function GET() {
     })
   );
 
-  const questions = await questionQuery.execute();
+  const questions = await db
+    .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
+    .from(QuestionTable)
+    .where(gte(QuestionTable.createdAt, startDate));
 
   const responses = await Promise.all(requests);
   const leaderboard: Leaderboard = {};
