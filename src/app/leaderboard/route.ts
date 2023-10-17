@@ -1,3 +1,4 @@
+import { QuestionTable, db } from "@/db";
 import { notNullish } from "@/ts-utils";
 import {
   ChatPostMessageArguments,
@@ -5,12 +6,19 @@ import {
   WebClient,
 } from "@slack/web-api";
 import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse";
+import { gte } from "drizzle-orm";
 import { z } from "zod";
 
-const usernames = ["roccomaniscalco2001", "jimmyn"];
+const usernames = ["roccomaniscalco2001", "jnguyen2"];
 const SUBMISSIONS_LIMIT = 10;
 const now = new Date();
 const startDate = getStartDate(now);
+
+const questionQuery = db
+  .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
+  .from(QuestionTable)
+  .where(gte(QuestionTable.createdAt, startDate))
+  .prepare("question");
 
 const submissionsQuery = `    
 query recentAcSubmissions($username: String!, $limit: Int!) {
@@ -30,10 +38,14 @@ const submissionsSchema = z
       })
     ),
   })
-  .transform(({ recentAcSubmissionList }) => recentAcSubmissionList);
+  .transform(({ recentAcSubmissionList }) =>
+    recentAcSubmissionList.reduce<Record<string, string>>((acc, curr) => {
+      acc[curr.titleSlug] = curr.timestamp;
+      return acc;
+    }, {})
+  );
 
-type Submission = z.infer<typeof submissionsSchema>[number];
-type Leaderboard = Record<string, Submission[]>;
+type Leaderboard = Record<string, boolean[]>;
 
 export async function GET() {
   const requests = usernames.map((username) =>
@@ -52,6 +64,8 @@ export async function GET() {
     })
   );
 
+  const questions = await questionQuery.execute();
+
   const responses = await Promise.all(requests);
   const leaderboard: Leaderboard = {};
 
@@ -65,15 +79,17 @@ export async function GET() {
     const submissions = submissionsSchema.safeParse(data);
     const username = notNullish(usernames[i]);
     if (submissions.success) {
-      const submissionsInPeriod = submissions.data.filter(
-        (s) => new Date(parseInt(s.timestamp) * 1000) >= startDate
-      );
-      leaderboard[username] = submissions.data;
+      leaderboard[username] = questions.map((q) => {
+        const timestamp = submissions.data[q.slug];
+        return timestamp
+          ? new Date(parseInt(timestamp) * 1000) >= q.createdAt
+          : false;
+      });
     }
   }
 
   await postLeaderboardToSlack(leaderboard);
-  return Response.json({ leaderboard }, { status: 200 });
+  return Response.json({ leaderboard, questions: questions }, { status: 200 });
 }
 
 async function postLeaderboardToSlack(leaderboard: Leaderboard) {
@@ -82,8 +98,12 @@ async function postLeaderboardToSlack(leaderboard: Leaderboard) {
   for await (const page of web.paginate("conversations.list")) {
     for (const channel of page.channels as Channel[]) {
       if (channel.is_member && channel.id && !channel.is_archived) {
-        const leaderboardMessage = getLeaderBoardMessage(leaderboard, channel.id);
+        const leaderboardMessage = getLeaderboardMessage(
+          leaderboard,
+          channel.id
+        );
         const res = await web.chat.postMessage(leaderboardMessage);
+
         if (!res.ok) {
           console.error("Failed to post leaderboard to Slack", res);
         }
@@ -92,10 +112,12 @@ async function postLeaderboardToSlack(leaderboard: Leaderboard) {
   }
 }
 
-function getLeaderBoardMessage(
+function getLeaderboardMessage(
   leaderboard: Leaderboard,
   channelId: string
 ): ChatPostMessageArguments {
+  const highScorers = getHighScorers(leaderboard);
+
   return {
     channel: channelId,
     mrkdwn: true,
@@ -110,17 +132,22 @@ function getLeaderBoardMessage(
           },
           {
             type: "mrkdwn",
-            text: "`m`  `w`  `t`  `t`  `f`",
+            text: "`Ｍ` `Ｔ` `Ｗ` `Ｔ` `Ｆ`",
           },
           ...Object.entries(leaderboard).flatMap<MrkdwnElement>(
-            ([username, submissions]) => [
+            ([username, isAcceptedSubmissions]) => [
               {
                 type: "mrkdwn",
-                text: `👑 *${username}*`,
+                text: `*${username}* ${
+                  highScorers.includes(username) ? "👑" : ""
+                }`,
               },
               {
                 type: "mrkdwn",
-                text: `${submissions.map((s) => "▢").join("  ")}`,
+                text: `${[
+                  ...isAcceptedSubmissions.map((b) => (b ? "`🟩`" : "`⬛️`")),
+                  ...Array(5 - isAcceptedSubmissions.length).fill("`⬛️`"),
+                ].join(" ")}`,
               },
             ]
           ),
@@ -148,4 +175,22 @@ function getStartDate(now: Date) {
   startDate.setDate(startDate.getDate() - ((startDate.getDay() + 6) % 7));
   startDate.setUTCHours(12, 0, 0, 0);
   return startDate;
+}
+
+function getHighScorers(leaderboard: Leaderboard) {
+  const highScore = Object.values(leaderboard).reduce((acc, curr) => {
+    const score = curr.filter((b) => b).length;
+    return score > acc ? score : acc;
+  }, 0);
+  const highScorers = Object.entries(leaderboard).reduce<string[]>(
+    (acc, curr) => {
+      const score = curr[1].filter((b) => b).length;
+      if (score === highScore) {
+        acc.push(curr[0]);
+      }
+      return acc;
+    },
+    []
+  );
+  return highScorers;
 }

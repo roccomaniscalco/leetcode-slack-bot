@@ -1,3 +1,4 @@
+import { QuestionTable, db } from "@/db";
 import { ChatPostMessageArguments, WebClient } from "@slack/web-api";
 import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse";
 import { z } from "zod";
@@ -66,6 +67,9 @@ export async function GET(request: Request) {
   } while (!question.success);
 
   await postQuestionToSlack(question.data);
+  await db.insert(QuestionTable).values({
+    slug: question.data.titleSlug,
+  });
   return Response.json({ success: true }, { status: 200 });
 }
 
