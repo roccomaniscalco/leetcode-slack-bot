@@ -1,7 +1,8 @@
+import { isFulfilled, notNullish } from "@/ts-utils";
 import { z } from "zod";
 
 const usernames = ["roccomaniscalco2001"];
-const SUBMISSIONS_LIMIT = 5;
+const SUBMISSIONS_LIMIT = 10;
 
 const submissionsQuery = `    
 query recentAcSubmissions($username: String!, $limit: Int!) {
@@ -16,50 +17,63 @@ query recentAcSubmissions($username: String!, $limit: Int!) {
 
 const submissionsSchema = z
   .object({
-    recentAcSubmissionList: z
-      .array(
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          titleSlug: z.string(),
-          timestamp: z.string(),
-        })
-      )
-      .max(SUBMISSIONS_LIMIT),
+    recentAcSubmissionList: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        titleSlug: z.string(),
+        timestamp: z.string(),
+      })
+    ),
   })
   .transform(({ recentAcSubmissionList }) => recentAcSubmissionList);
 
-export async function GET() {
-  const res = await fetch("https://leetcode.com/graphql", {
-    next: { revalidate: 0 }, // Always revalidate
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      operationName: "recentAcSubmissions",
-      query: submissionsQuery,
-      variables: {
-        username: usernames[0],
-        limit: SUBMISSIONS_LIMIT,
-      },
-    }),
-  });
+type Submission = z.infer<typeof submissionsSchema>[number];
 
-  if (!res.ok) {
-    return Response.json({ success: false }, { status: 500 });
+export async function GET() {
+  const requests = usernames.map((username) =>
+    fetch("https://leetcode.com/graphql", {
+      next: { revalidate: 0 }, // Always revalidate
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operationName: "recentAcSubmissions",
+        query: submissionsQuery,
+        variables: {
+          username,
+          limit: SUBMISSIONS_LIMIT,
+        },
+      }),
+    })
+  );
+
+  const responses = await Promise.allSettled(requests);
+  const startDate = getStartDate();
+  const leaderboard: Record<string, Submission[]> = {};
+
+  for (let i = 0; i < responses.length; i++) {
+    const response = notNullish(responses[i]);
+    const username = notNullish(usernames[i]);
+
+    if (isFulfilled(response)) {
+      const { data } = await response.value.json();
+      const submissions = submissionsSchema.parse(data);
+      const submissionsInPeriod = submissions.filter(
+        (s) => new Date(parseInt(s.timestamp) * 1000) >= startDate
+      );
+      leaderboard[username] = submissionsInPeriod;
+    }
   }
 
-  const { data } = await res.json();
-  const submissions = submissionsSchema.parse(data);
-  return Response.json({ success: true, submissions });
+  return Response.json({
+    leaderboard,
+  });
 }
 
-function isWithinPeriod(timestamp: string) {
-  const dateToCheck = new Date(parseInt(timestamp) * 1000);
-
-  // startDate is the most recent Monday at 12:00 UTC
+// startDate is the most recent Monday at 12:00 UTC
+function getStartDate() {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - ((startDate.getDay() + 6) % 7));
   startDate.setUTCHours(12, 0, 0, 0);
-
-  return dateToCheck >= startDate;
+  return startDate;
 }
