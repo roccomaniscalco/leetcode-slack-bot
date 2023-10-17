@@ -1,7 +1,7 @@
-import { isFulfilled, notNullish } from "@/ts-utils";
+import { notNullish } from "@/ts-utils";
 import { z } from "zod";
 
-const usernames = ["roccomaniscalco2001"];
+const usernames = ["roccomaniscalco2001", "blah123"];
 const SUBMISSIONS_LIMIT = 10;
 
 const submissionsQuery = `    
@@ -47,18 +47,21 @@ export async function GET() {
     })
   );
 
-  const responses = await Promise.allSettled(requests);
+  const responses = await Promise.all(requests);
   const startDate = getStartDate();
   const leaderboard: Record<string, Submission[]> = {};
 
   for (let i = 0; i < responses.length; i++) {
     const response = notNullish(responses[i]);
-    const username = notNullish(usernames[i]);
+    if (!response.ok) {
+      return Response.json({ success: false }, { status: 500 });
+    }
 
-    if (isFulfilled(response)) {
-      const { data } = await response.value.json();
-      const submissions = submissionsSchema.parse(data);
-      const submissionsInPeriod = submissions.filter(
+    const { data } = await response.json();
+    const submissions = submissionsSchema.safeParse(data);
+    const username = notNullish(usernames[i]);
+    if (submissions.success) {
+      const submissionsInPeriod = submissions.data.filter(
         (s) => new Date(parseInt(s.timestamp) * 1000) >= startDate
       );
       leaderboard[username] = submissionsInPeriod;
