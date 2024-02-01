@@ -4,19 +4,19 @@ import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse"
 import { z } from "zod";
 
 const questionQuery = `
-query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
-  randomQuestion(categorySlug: $categorySlug, filters: $filters) {
-    questionId
-    title
-    titleSlug
-    difficulty
-    categoryTitle
-    likes
-    dislikes
-    isPaidOnly
+  query randomQuestion($categorySlug: String, $filters: QuestionListFilterInput) {
+    randomQuestion(categorySlug: $categorySlug, filters: $filters) {
+      questionId
+      title
+      titleSlug
+      difficulty
+      categoryTitle
+      likes
+      dislikes
+      isPaidOnly
+    }
   }
-}
-`;
+  `;
 
 const questionSchema = z
   .object({
