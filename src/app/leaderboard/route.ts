@@ -9,10 +9,9 @@ import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse"
 import { gte } from "drizzle-orm";
 import { z } from "zod";
 
-const usernames = ["roccomaniscalco2001", "jnguyen2"];
+const USERNAMES = ["roccomaniscalco2001", "PrettyLegit"];
 const SUBMISSIONS_LIMIT = 10;
-const now = new Date();
-const startDate = getStartDate(now);
+const currentWeek = getCurrentWeek(getStartDate(new Date()));
 
 const submissionsQuery = `    
 query recentAcSubmissions($username: String!, $limit: Int!) {
@@ -32,17 +31,14 @@ const submissionsSchema = z
       })
     ),
   })
-  .transform(({ recentAcSubmissionList }) =>
-    recentAcSubmissionList.reduce<Record<string, string>>((acc, curr) => {
-      acc[curr.titleSlug] = curr.timestamp;
-      return acc;
-    }, {})
-  );
+  .transform(({ recentAcSubmissionList: submissions }) => {
+    return submissions;
+  });
 
 type Leaderboard = Record<string, boolean[]>;
 
 export async function GET() {
-  const requests = usernames.map((username) =>
+  const requests = USERNAMES.map((username) =>
     fetch("https://leetcode.com/graphql", {
       next: { revalidate: 0 }, // Always revalidate
       method: "POST",
@@ -61,7 +57,7 @@ export async function GET() {
   const questions = await db
     .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
     .from(QuestionTable)
-    .where(gte(QuestionTable.createdAt, startDate));
+    .where(gte(QuestionTable.createdAt, notNullish(currentWeek[0])));
 
   const responses = await Promise.all(requests);
   const leaderboard: Leaderboard = {};
@@ -74,13 +70,15 @@ export async function GET() {
 
     const { data } = await response.json();
     const submissions = submissionsSchema.safeParse(data);
-    const username = notNullish(usernames[i]);
+    const username = notNullish(USERNAMES[i]);
     if (submissions.success) {
-      leaderboard[username] = questions.map((q) => {
-        const timestamp = submissions.data[q.slug];
-        return timestamp
-          ? new Date(parseInt(timestamp) * 1000) >= q.createdAt
-          : false;
+      leaderboard[username] = currentWeek.map((date) => {
+        const weekDay = date.toDateString();
+        const submission = submissions.data.find(({ timestamp }) => {
+          const submissionDay = new Date(+timestamp * 1000).toDateString();
+          return submissionDay === weekDay;
+        });
+        return !!submission;
       });
     }
   }
@@ -100,7 +98,6 @@ async function postLeaderboardToSlack(leaderboard: Leaderboard) {
           channel.id
         );
         const res = await web.chat.postMessage(leaderboardMessage);
-
         if (!res.ok) {
           console.error("Failed to post leaderboard to Slack", res);
         }
@@ -132,7 +129,7 @@ function getLeaderboardMessage(
             text: "`Ｍ` `Ｔ` `Ｗ` `Ｔ` `Ｆ`",
           },
           ...Object.entries(leaderboard).flatMap<MrkdwnElement>(
-            ([username, isAcceptedSubmissions]) => [
+            ([username, submissions]) => [
               {
                 type: "mrkdwn",
                 text: `*${username}* ${
@@ -141,10 +138,9 @@ function getLeaderboardMessage(
               },
               {
                 type: "mrkdwn",
-                text: `${[
-                  ...isAcceptedSubmissions.map((b) => (b ? "`🟩`" : "`⬛️`")),
-                  ...Array(5 - isAcceptedSubmissions.length).fill("`⬛️`"),
-                ].join(" ")}`,
+                text: `${submissions
+                  .map((b) => (b ? "`🟩`" : "`⬛️`"))
+                  .join(" ")}`,
               },
             ]
           ),
@@ -155,7 +151,11 @@ function getLeaderboardMessage(
         elements: [
           {
             type: "mrkdwn",
-            text: `${startDate.toLocaleDateString()} - ${now.toLocaleDateString()}`,
+            text: `${notNullish(
+              currentWeek[0]
+            ).toLocaleDateString()} - ${notNullish(
+              currentWeek[4]
+            ).toLocaleDateString()}`,
           },
         ],
       },
@@ -172,6 +172,17 @@ function getStartDate(now: Date) {
   startDate.setDate(startDate.getDate() - ((startDate.getDay() + 6) % 7));
   startDate.setUTCHours(12, 0, 0, 0);
   return startDate;
+}
+
+// Return 5 day week from date
+function getCurrentWeek(startDate: Date) {
+  const currentWeek = [];
+  for (let i = 0; i < 5; i++) {
+    const day = new Date(startDate);
+    day.setDate(day.getDate() + i);
+    currentWeek.push(day);
+  }
+  return currentWeek;
 }
 
 function getHighScorers(leaderboard: Leaderboard) {
