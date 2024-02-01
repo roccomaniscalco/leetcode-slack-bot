@@ -190,10 +190,9 @@ function getHighScorers(leaderboard: Leaderboard) {
     return score > acc ? score : acc;
   }, 0);
   const highScorers = Object.entries(leaderboard).reduce<string[]>(
-    (acc, curr) => {
-      const score = curr[1].filter((b) => b).length;
-      if (score === highScore) {
-        acc.push(curr[0]);
+    (acc, [username, submissions]) => {
+      if (submissions.filter((b) => b).length === highScore) {
+        acc.push(username);
       }
       return acc;
     },
