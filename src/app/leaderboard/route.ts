@@ -14,13 +14,13 @@ const SUBMISSIONS_LIMIT = 10;
 const currentWeek = getCurrentWeek(getStartDate(new Date()));
 
 const submissionsQuery = `    
-query recentAcSubmissions($username: String!, $limit: Int!) {
-  recentAcSubmissionList(username: $username, limit: $limit) {
-    titleSlug
-    timestamp
+  query recentAcSubmissions($username: String!, $limit: Int!) {
+    recentAcSubmissionList(username: $username, limit: $limit) {
+      titleSlug
+      timestamp
+    }
   }
-}
-`;
+  `;
 
 const submissionsSchema = z
   .object({
@@ -31,57 +31,56 @@ const submissionsSchema = z
       })
     ),
   })
-  .transform(({ recentAcSubmissionList: submissions }) => {
-    return submissions;
+  .transform(({ recentAcSubmissionList }) => recentAcSubmissionList);
+
+function getSubmissions(user: string) {
+  return fetch("https://leetcode.com/graphql", {
+    next: { revalidate: 0 }, // Always revalidate
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operationName: "recentAcSubmissions",
+      query: submissionsQuery,
+      variables: {
+        username: user,
+        limit: SUBMISSIONS_LIMIT,
+      },
+    }),
   });
+}
 
 type Leaderboard = Record<string, boolean[]>;
 
 export async function GET() {
-  const requests = USERNAMES.map((username) =>
-    fetch("https://leetcode.com/graphql", {
-      next: { revalidate: 0 }, // Always revalidate
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        operationName: "recentAcSubmissions",
-        query: submissionsQuery,
-        variables: {
-          username,
-          limit: SUBMISSIONS_LIMIT,
-        },
-      }),
-    })
-  );
-
   const questions = await db
     .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
     .from(QuestionTable)
-    .where(gte(QuestionTable.createdAt, notNullish(currentWeek[0])));
+    .where(gte(QuestionTable.createdAt, notNullish(currentWeek[0])))
+    .then((res) => res.map(({ slug }) => slug));
 
-  const responses = await Promise.all(requests);
-  const leaderboard: Leaderboard = {};
+  const submissionsByUser = await Promise.all(
+    USERNAMES.flatMap((user) =>
+      getSubmissions(user)
+        .then((res) => res.json())
+        .then(({ data }) => submissionsSchema.parseAsync(data))
+        .then((submissions) => [user, submissions] as const)
+    )
+  );
 
-  for (let i = 0; i < responses.length; i++) {
-    const response = notNullish(responses[i]);
-    if (!response.ok) {
-      return Response.json({ success: false }, { status: 500 });
-    }
-
-    const { data } = await response.json();
-    const submissions = submissionsSchema.safeParse(data);
-    const username = notNullish(USERNAMES[i]);
-    if (submissions.success) {
-      leaderboard[username] = currentWeek.map((date) => {
+  const leaderboard = submissionsByUser.reduce<Leaderboard>(
+    (acc, [user, submissions]) => {
+      acc[user] = currentWeek.map((date) => {
         const weekDay = date.toDateString();
-        const submission = submissions.data.find(({ timestamp }) => {
+        const submission = submissions.find(({ timestamp }) => {
           const submissionDay = new Date(+timestamp * 1000).toDateString();
           return submissionDay === weekDay;
         });
         return !!submission;
       });
-    }
-  }
+      return acc;
+    },
+    {}
+  );
 
   await postLeaderboardToSlack(leaderboard);
   return Response.json({ leaderboard, questions: questions }, { status: 200 });
