@@ -1,6 +1,6 @@
 import { QuestionTable, db } from "@/db";
 import { notNullish } from "@/ts-utils";
-import { ChatPostMessageArguments, MrkdwnElement } from "@slack/web-api";
+import { MrkdwnElement } from "@slack/web-api";
 import { gte } from "drizzle-orm";
 import { z } from "zod";
 
