@@ -1,11 +1,6 @@
 import { QuestionTable, db } from "@/db";
 import { notNullish } from "@/ts-utils";
-import {
-  ChatPostMessageArguments,
-  MrkdwnElement,
-  WebClient,
-} from "@slack/web-api";
-import { Channel } from "@slack/web-api/dist/response/ConversationsListResponse";
+import { ChatPostMessageArguments, MrkdwnElement } from "@slack/web-api";
 import { gte } from "drizzle-orm";
 import { z } from "zod";
 
@@ -51,7 +46,7 @@ function getSubmissions(user: string) {
 
 type Leaderboard = Record<string, boolean[]>;
 
-export async function GET() {
+export async function POST() {
   const questions = await db
     .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
     .from(QuestionTable)
@@ -82,37 +77,16 @@ export async function GET() {
     {}
   );
 
-  await postLeaderboardToSlack(leaderboard);
-  return Response.json({ leaderboard, questions: questions }, { status: 200 });
+  const leaderboardMessage = getLeaderboardMessage(leaderboard);
+
+  return Response.json(leaderboardMessage, { status: 200 });
 }
 
-async function postLeaderboardToSlack(leaderboard: Leaderboard) {
-  const web = new WebClient(process.env.SLACK_TOKEN);
-
-  for await (const page of web.paginate("conversations.list")) {
-    for (const channel of page.channels as Channel[]) {
-      if (channel.is_member && channel.id && !channel.is_archived) {
-        const leaderboardMessage = getLeaderboardMessage(
-          leaderboard,
-          channel.id
-        );
-        const res = await web.chat.postMessage(leaderboardMessage);
-        if (!res.ok) {
-          console.error("Failed to post leaderboard to Slack", res);
-        }
-      }
-    }
-  }
-}
-
-function getLeaderboardMessage(
-  leaderboard: Leaderboard,
-  channelId: string
-): ChatPostMessageArguments {
+function getLeaderboardMessage(leaderboard: Leaderboard) {
   const highScorers = getHighScorers(leaderboard);
 
   return {
-    channel: channelId,
+    response_type: "in_channel",
     mrkdwn: true,
     text: "Leaderboard",
     blocks: [
