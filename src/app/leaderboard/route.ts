@@ -50,8 +50,7 @@ export async function POST() {
   const questions = await db
     .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
     .from(QuestionTable)
-    .where(gte(QuestionTable.createdAt, notNullish(currentWeek[0])))
-    .then((res) => res.map(({ slug }) => slug));
+    .where(gte(QuestionTable.createdAt, currentWeek[0]));
 
   const submissionsByUser = await Promise.all(
     USERNAMES.flatMap((user) =>
@@ -62,23 +61,23 @@ export async function POST() {
     )
   );
 
-  const leaderboard = submissionsByUser.reduce<Leaderboard>(
-    (acc, [user, submissions]) => {
-      acc[user] = currentWeek.map((date) => {
-        const weekDay = date.toDateString();
-        const submission = submissions.find(({ timestamp }) => {
-          const submissionDay = new Date(+timestamp * 1000).toDateString();
-          return submissionDay === weekDay;
-        });
-        return !!submission;
-      });
-      return acc;
-    },
-    {}
-  );
+  const leaderboard: Leaderboard = {};
+  for (const [username, submissions] of submissionsByUser) {
+    leaderboard[username] = [];
+    const userLeaderboard = notNullish(leaderboard[username]);
+
+    for (const day of currentWeek) {
+      const question = questions.find(
+        (q) => q.createdAt.toDateString() === day.toDateString()
+      );
+      const hasSubmittedQuestion = submissions.some(
+        (s) => s.titleSlug === question?.slug
+      );
+      userLeaderboard.push(hasSubmittedQuestion);
+    }
+  }
 
   const leaderboardMessage = getLeaderboardMessage(leaderboard);
-
   return Response.json(leaderboardMessage, { status: 200 });
 }
 
@@ -111,9 +110,9 @@ function getLeaderboardMessage(leaderboard: Leaderboard) {
               },
               {
                 type: "mrkdwn",
-                text: `${submissions
-                  .map((b) => (b ? "`🟩`" : "`⬛️`"))
-                  .join(" ")}`,
+                text: submissions
+                  .map((didSubmit) => (didSubmit ? "`🟩`" : "`⬛️`"))
+                  .join(" "),
               },
             ]
           ),
@@ -124,11 +123,10 @@ function getLeaderboardMessage(leaderboard: Leaderboard) {
         elements: [
           {
             type: "mrkdwn",
-            text: `${notNullish(
-              currentWeek[0]
-            ).toLocaleDateString()} - ${notNullish(
-              currentWeek[4]
-            ).toLocaleDateString()}`,
+            text:
+              currentWeek[0].toLocaleDateString() +
+              " - " +
+              currentWeek[4].toLocaleDateString(),
           },
         ],
       },
@@ -142,22 +140,25 @@ function getLeaderboardMessage(leaderboard: Leaderboard) {
 // startDate is the most recent Monday at 12:00 UTC
 function getStartDate(now: Date) {
   const startDate = new Date(now);
-  startDate.setDate(startDate.getDate() - ((startDate.getDay() + 6) % 7));
+  const monday = startDate.getUTCDate() - ((startDate.getUTCDay() + 6) % 7);
+  startDate.setUTCDate(monday);
   startDate.setUTCHours(12, 0, 0, 0);
   return startDate;
 }
 
-// Return 5 day week from date
+// return 5 day week from startDate
 function getCurrentWeek(startDate: Date) {
   const currentWeek = [];
   for (let i = 0; i < 5; i++) {
     const day = new Date(startDate);
-    day.setDate(day.getDate() + i);
+    day.setUTCDate(day.getUTCDate() + i);
     currentWeek.push(day);
   }
-  return currentWeek;
+  return currentWeek as [Date, Date, Date, Date, Date];
 }
 
+// return list of users with the highest score
+// if there are multiple users with the same highest score, return all of them
 function getHighScorers(leaderboard: Leaderboard) {
   const highScore = Object.values(leaderboard).reduce((acc, curr) => {
     const score = curr.filter((b) => b).length;
