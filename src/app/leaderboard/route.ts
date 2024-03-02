@@ -46,7 +46,7 @@ function getSubmissions(user: string) {
 
 type Leaderboard = Record<string, boolean[]>;
 
-export async function GET() {
+export async function POST() {
   const questions = await db
     .select({ slug: QuestionTable.slug, createdAt: QuestionTable.createdAt })
     .from(QuestionTable)
