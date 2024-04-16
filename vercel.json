@@ -1,6 +1,0 @@
-{
-  "crons": [{
-    "path": "/random-question",
-    "schedule": "0 12 * * 1-5"
-  }]
-}
